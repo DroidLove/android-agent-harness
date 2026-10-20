@@ -1,0 +1,137 @@
+name: guards
+
+# These are the gates the agent cannot talk its way past.
+# Each one exists because of an observed failure mode — see docs/failure-taxonomy.md.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Comma-joined label list, e.g. ",agent,large-diff,"
+      LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect changed files
+        id: diff
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=50 origin "${{ github.base_ref }}"
+          git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed.txt
+          echo "Changed files:"; cat changed.txt
+          echo "count=$(wc -l < changed.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------- dependencies
+      - name: Guard — dependency changes need approval
+        run: |
+          set -euo pipefail
+          hits=$(grep -E '(^|/)(build\.gradle(\.kts)?|libs\.versions\.toml|settings\.gradle(\.kts)?)$' changed.txt || true)
+          if [ -n "$hits" ]; then
+            echo "Dependency/build configuration changed:"; echo "$hits"
+            case ",$LABELS," in
+              *",deps-approved,"*) echo "::notice::Label 'deps-approved' present — allowing." ;;
+              *)
+                echo "::error::Build/dependency files changed without the 'deps-approved' label."
+                echo "Agents must not add dependencies or alter build config. A human reviews the supply-chain risk and adds the label."
+                exit 1
+                ;;
+            esac
+          fi
+
+      # ---------------------------------------------------------------- CI config
+      - name: Guard — agents may not edit the gate
+        run: |
+          set -euo pipefail
+          hits=$(grep -E '^(\.github/|scripts/)' changed.txt || true)
+          if [ -n "$hits" ]; then
+            echo "::error::CI or guard scripts were modified. An agent must not be able to weaken the gate that judges it."
+            echo "$hits"
+            exit 1
+          fi
+
+      # ---------------------------------------------------------------- test integrity
+      - name: Guard — tests must not be weakened
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.base_ref }}"
+          failures=0
+
+          # 1. No test files deleted.
+          deleted=$(grep -E '^.*/src/(test|androidTest)/.*\.kt$' changed.txt | while read -r f; do
+            [ -f "$f" ] || echo "$f"
+          done || true)
+          if [ -n "$deleted" ]; then
+            echo "::error::Test files were deleted:"; echo "$deleted"; failures=1
+          fi
+
+          # 2. Total @Test count must not decrease.
+          base_count=$(git grep -h "@Test" "$base" -- '*.kt' 2>/dev/null | wc -l | tr -d ' ')
+          head_count=$(git grep -h "@Test" HEAD -- '*.kt' 2>/dev/null | wc -l | tr -d ' ')
+          echo "@Test count: base=$base_count head=$head_count"
+          if [ "$head_count" -lt "$base_count" ]; then
+            echo "::error::Test count decreased ($base_count -> $head_count). Adding a test elsewhere does not license deleting one."
+            failures=1
+          fi
+
+          # 3. No new @Ignore / @Disabled on tests.
+          new_ignores=$(git diff "$base...HEAD" -- '*.kt' | grep -E '^\+' | grep -Ec '@Ignore|@Disabled' || true)
+          if [ "${new_ignores:-0}" -gt 0 ]; then
+            echo "::error::New @Ignore/@Disabled added to a test. Fix the test or the code."
+            failures=1
+          fi
+
+          exit "$failures"
+
+      # ---------------------------------------------------------------- secrets
+      - name: Guard — no secrets
+        run: |
+          set -euo pipefail
+          patterns='AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}'
+          if git diff "origin/${{ github.base_ref }}...HEAD" -U0 \
+              | grep -E '^\+' \
+              | grep -Ev '^\+\+\+' \
+              | grep -Eq "$patterns"; then
+            echo "::error::Possible credential in the diff. Remove it and rotate the key — it is already in your shell history and CI logs."
+            exit 1
+          fi
+
+      # ---------------------------------------------------------------- diff size
+      - name: Guard — diff size budget
+        run: |
+          set -euo pipefail
+          changed=$(git diff "origin/${{ github.base_ref }}...HEAD" | grep -Ec '^[+-][^+-]' || true)
+          echo "Changed lines: ${changed:-0}"
+          if [ "${changed:-0}" -gt 500 ]; then
+            case ",$LABELS," in
+              *",large-diff,"*) echo "::notice::Label 'large-diff' present — allowing." ;;
+              *)
+                echo "::error::Diff exceeds 500 changed lines. Large diffs are unreviewable and hide scope creep. Split the task, or a human adds the 'large-diff' label with a justification."
+                exit 1
+                ;;
+            esac
+          fi
+
+      # ---------------------------------------------------------------- provenance
+      - name: Label agent-authored PRs
+        if: contains(github.event.pull_request.body, 'Agent-PR')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Labelling agent PRs is what makes the cohort measurable later:
+            //   revert rate, review rounds, defect escapes — agent vs human.
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: context.issue.number,
+              labels: ['agent-authored']
+            });

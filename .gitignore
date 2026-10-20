@@ -1,0 +1,21 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Never commit signing material
+*.jks
+*.keystore
+keystore.properties
+.env
+.env.*
+
+# Test output, but NOT app/src/test/screenshots (goldens are committed on purpose)
+app/build/
+core/ui/build/

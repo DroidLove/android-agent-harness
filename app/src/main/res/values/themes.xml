@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Compose-only app: the XML theme exists solely so the Activity has a window background
+        before the first frame. Deliberately depends on the platform Material theme so the
+        design system does not pull in com.google.android.material.
+    -->
+    <style name="Theme.Harness" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

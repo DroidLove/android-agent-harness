@@ -1,0 +1,63 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Gradle wrapper
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "::error::gradle-wrapper.jar is missing. Run 'gradle wrapper --gradle-version 8.11.1' locally and commit it. See docs/first-run.md."
+            exit 1
+          fi
+          chmod +x gradlew
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          # PRs read the cache; only main can write it (prevents cache poisoning).
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Verify (compile + unit tests + lint)
+        run: ./gradlew verify --stacktrace
+
+      - name: Screenshot tests
+        run: |
+          if [ -n "$(ls -A app/src/test/screenshots 2>/dev/null || true)" ]; then
+            echo "Goldens found — comparing."
+            ./gradlew :app:verifyRoborazziDebug
+          else
+            echo "::warning::No golden screenshots committed yet. Recording instead of comparing. Commit app/src/test/screenshots to enable visual regression."
+            ./gradlew :app:recordRoborazziDebug
+          fi
+
+      - name: Upload screenshots and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: |
+            app/src/test/screenshots
+            app/build/outputs/roborazzi
+            app/build/reports
+          if-no-files-found: ignore
+          retention-days: 14
