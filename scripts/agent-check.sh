@@ -9,7 +9,7 @@
 #
 set -uo pipefail
 
-BASE="${BASE:-origin/main}"
+BASE="${BASE:-}"
 SKIP_VERIFY="${SKIP_VERIFY:-0}"
 FAIL=0
 
@@ -23,13 +23,24 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 2
 fi
 
-MERGE_BASE="$(git merge-base "$BASE" HEAD 2>/dev/null || echo "")"
-if [ -z "$MERGE_BASE" ]; then
-  echo "Cannot find merge-base with '$BASE'. Set BASE=<ref>." >&2
+# Resolve a base ref: explicit BASE > upstream > local main/master > HEAD.
+if [ -z "$BASE" ]; then
+  for ref in origin/main origin/master main master; do
+    if git rev-parse --verify -q "$ref" >/dev/null 2>&1; then BASE="$ref"; break; fi
+  done
+fi
+if [ -z "$BASE" ]; then
+  BASE="HEAD"
+  info "No remote or main branch found; checking uncommitted changes only."
+fi
+
+MERGE_BASE="$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")"
+if ! git rev-parse --verify -q "$MERGE_BASE" >/dev/null 2>&1; then
+  echo "Cannot resolve base '$BASE'. Set BASE=<ref>." >&2
   exit 2
 fi
 
-CHANGED="$(git diff --name-only "$MERGE_BASE"...HEAD || true)"
+CHANGED="$(git diff --name-only "$MERGE_BASE" || true)"
 if [ -z "$CHANGED" ]; then
   echo "No changes against $BASE. Nothing to check."
   exit 0
@@ -74,7 +85,7 @@ else
   pass "Test count did not decrease"
 fi
 
-NEW_IGNORES="$(git diff "$MERGE_BASE"...HEAD -- '*.kt' | grep -E '^\+' | grep -Ec '@Ignore|@Disabled' || true)"
+NEW_IGNORES="$(git diff "$MERGE_BASE" -- '*.kt' | grep -E '^\+' | grep -Ec '@Ignore|@Disabled' || true)"
 if [ "${NEW_IGNORES:-0}" -gt 0 ]; then
   fail "$NEW_IGNORES new @Ignore/@Disabled annotation(s) added"
 else
@@ -82,7 +93,7 @@ else
 fi
 
 bold "Guard: secrets"
-SECRETS="$(git diff "$MERGE_BASE"...HEAD -U0 \
+SECRETS="$(git diff "$MERGE_BASE" -U0 \
   | grep -E '^\+' | grep -Ev '^\+\+\+' \
   | grep -E 'AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}' || true)"
 if [ -n "$SECRETS" ]; then
@@ -92,7 +103,7 @@ else
 fi
 
 bold "Guard: diff size"
-LINES="$(git diff "$MERGE_BASE"...HEAD | grep -Ec '^[+-][^+-]' || true)"
+LINES="$(git diff "$MERGE_BASE" | grep -Ec '^[+-][^+-]' || true)"
 info "$LINES changed lines (budget 500, soft)"
 if [ "${LINES:-0}" -gt 500 ]; then
   fail "Diff exceeds 500 lines — split the task or justify it to a human"

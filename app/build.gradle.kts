@@ -78,4 +78,8 @@ dependencies {
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
+
+    // Provides the host activity for Compose tests. Required: without it every
+    // createComposeRule() test fails with "Unable to resolve activity for Intent".
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

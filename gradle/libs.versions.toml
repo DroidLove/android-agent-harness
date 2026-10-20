@@ -32,6 +32,10 @@ androidx-compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+# Registers androidx.activity.ComponentActivity in the DEBUG manifest so Compose UI tests
+# (including Robolectric ones) can launch a host activity. Omitting this produces:
+#   "Unable to resolve activity for Intent ... androidx.activity.ComponentActivity"
+androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 
 junit4 = { module = "junit:junit", version.ref = "junit4" }
