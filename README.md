@@ -1,5 +1,7 @@
 # android-agent-harness
 
+[![verify](https://github.com/DroidLove/android-agent-harness/actions/workflows/verify.yml/badge.svg)](https://github.com/DroidLove/android-agent-harness/actions/workflows/verify.yml)
+
 **A reference setup for running AI coding agents safely on a production Android codebase.**
 
 Coding agents are good at writing code and bad at *proving* it works. On Android that gap is

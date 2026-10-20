@@ -129,9 +129,9 @@ If the warm number is above ~60s, the loop is too slow for an agent. Fix in this
 - [x] `./gradlew verify` green
 - [x] Goldens committed and visually reviewed
 - [x] `README.md` §Results filled with measured values, machine noted
-- [ ] Create the GitHub repository, push, add description + topics:
+- [x] Create the GitHub repository, push, add description + topics:
       `android`, `ai-agents`, `compose`, `roborazzi`, `developer-tools`, `ci`
-- [ ] CI badge added to the README
+- [x] CI badge added to the README
 - [ ] `LICENSE` copyright line updated
 - [ ] No secrets, no employer code, no client names
 - [ ] Commit history is honest — no backdated work
