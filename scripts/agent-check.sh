@@ -77,7 +77,9 @@ else
 fi
 
 BASE_COUNT="$(git grep -h '@Test' "$MERGE_BASE" -- '*.kt' 2>/dev/null | wc -l | tr -d ' ')"
-HEAD_COUNT="$(git grep -h '@Test' HEAD -- '*.kt' 2>/dev/null | wc -l | tr -d ' ')"
+# Count the WORKING TREE, not HEAD — otherwise a local guard run compares a commit to itself
+# and silently passes while the agent has just weakened the suite on disk.
+HEAD_COUNT="$(git ls-files '*.kt' | tr '\n' '\0' | xargs -0 grep -h '@Test' 2>/dev/null | wc -l | tr -d ' ')"
 info "@Test count: $BASE_COUNT -> $HEAD_COUNT"
 if [ "$HEAD_COUNT" -lt "$BASE_COUNT" ]; then
   fail "Test count decreased — adding a test elsewhere does not license deleting one"
