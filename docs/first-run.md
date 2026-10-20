@@ -1,97 +1,80 @@
 # First run
 
-This scaffold was authored without a JDK or Android SDK available, so **it has not been
-compiled**. Everything below is the path to a green build on your machine. Budget 30–45 minutes
-for the first pass, mostly download time.
+This repo is built, tested and benchmarked. It is not a scaffold that "should" work — the numbers
+in `README.md` §Results came from the commands below on the machine named there.
 
-> **Step 0 — initialise git.** The scaffold directory was created without a git repository
-> (`git` on this machine requires the Xcode command line tools). Run:
->
-> ```bash
-> cd android-agent-harness
-> git init
-> git add -A
-> git commit -m "Scaffold: verification-first harness for AI-assisted Android delivery"
-> ```
->
-> Then create the GitHub repo and push. Do not squash your later work into this commit — the
-> history is part of the story.
+What follows is the path from a clean clone to a green build, plus an honest record of what broke
+the first time, because that record is more useful to you than a tidy list of steps.
 
 ---
 
 ## 1. Prerequisites
 
-- JDK 17 (Android Studio's bundled JBR is fine: `Settings → Build Tools → Gradle → Gradle JDK`)
-- Android SDK Platform 35 + Build Tools 35
-- `ANDROID_HOME` set, or `local.properties` with `sdk.dir=/Users/<you>/Library/Android/sdk`
+- **JDK 17** (Android Studio's bundled JBR is fine: `Settings → Build Tools → Gradle → Gradle JDK`)
+- **Android SDK Platform 35** + **Build Tools 35**
+- `ANDROID_HOME` set, or `local.properties` containing `sdk.dir=/Users/<you>/Library/Android/sdk`
 
 ```bash
 java -version          # must be 17.x
 echo $ANDROID_HOME
 ```
 
----
-
-## 2. Generate the Gradle wrapper
-
-The wrapper JAR is intentionally not committed here (binaries can't be authored as text). CI
-checks for it and fails with a clear message if missing.
-
-```bash
-# Either open the project in Android Studio and let it sync (it offers to generate the wrapper),
-# or, if you have Gradle installed:
-gradle wrapper --gradle-version 8.11.1
-```
-
-Then commit `gradlew`, `gradlew.bat` and `gradle/wrapper/gradle-wrapper.jar`.
+The Gradle wrapper (8.11.1) is committed, so you do not need Gradle installed. First run downloads
+the distribution plus dependencies — about 1 GB, once, into `~/.gradle`.
 
 ---
 
-## 3. First build
+## 2. First build
 
 ```bash
 ./gradlew verify
 ```
 
-Expect 3–8 minutes on a cold machine. If it passes, you have the baseline.
+`verify` is compile + unit tests + lint + screenshot comparison. Nothing else needs to be known.
+On a cold machine expect several minutes of downloading and then a build in the low minutes; see
+§Results in the README for the measured figure on an M2.
+
+If it fails on dependency resolution, jump to §5.
 
 ---
 
-## 4. Record the golden screenshots
+## 3. Screenshot goldens
 
-Roborazzi needs a golden image before it can compare. Run record once, review the PNGs with your
-eyes, then commit them.
+Three goldens are committed in `app/src/test/screenshots/` — `home_loading`, `home_content`,
+`home_error`, each 822×1782 (411×891 dp at xhdpi). They are the fixture every UI change is judged
+against.
+
+Re-record only when the visual change is intended:
 
 ```bash
 ./gradlew :app:recordRoborazziDebug
-open app/src/test/screenshots     # macOS: check all three look right
+open app/src/test/screenshots      # look at them. all three.
 git add app/src/test/screenshots
-git commit -m "Add golden screenshots for HomeScreen"
 ```
 
-From now on:
-
-```bash
-./gradlew :app:verifyRoborazziDebug   # fails on any pixel diff
-```
-
-**Review the images before committing.** A golden test only protects you if the golden is correct
-— committing a broken render locks the bug in.
+A golden test protects you only if the golden is correct. Committing a broken render locks the bug
+in and makes the next real regression invisible.
 
 ---
 
-## 5. Benchmark it
+## 4. What actually broke on first run
 
-```bash
-RUNS=3 ./scripts/benchmark-verify.sh
-```
+Recorded because "it worked first time" is not a thing, and because these are the failure modes
+the repo exists to make visible.
 
-Paste the means into `README.md` §Results. Note your machine. A number without a machine is not
-a measurement.
+| What happened | Why | Fix |
+|---|---|---|
+| `Unable to resolve activity for Intent ... androidx.activity.ComponentActivity` on all 3 screenshot tests | Compose tests need a host activity registered in the **debug** manifest. The `ui-test-manifest` artifact does that; without it Robolectric has nothing to launch. | `debugImplementation("androidx.compose.ui:ui-test-manifest")` |
+| Local `agent-check.sh` reported `@Test count: 7 -> 7` after a test was deleted, and passed | The guard counted `git grep '@Test' HEAD` on both sides — comparing a commit to itself. Correct in CI (HEAD *is* the PR), wrong locally. | Count `git ls-files '*.kt'` from the working tree |
+| Build Tools 34 installed automatically | AGP 8.7.3 defaults to 34 even with `compileSdk 35` | Harmless; pin `buildToolsVersion` if you care about download size |
+
+The second one is the interesting one. A guard that passes when it should fail is worse than no
+guard, because it converts "we don't check" into "we checked". It was found by running the guard
+against a deliberately weakened suite, which is the only way to know a guard works.
 
 ---
 
-## 6. If resolution fails
+## 5. If resolution fails
 
 Four versions move fastest. If Gradle can't resolve, bump in this order and re-run:
 
@@ -100,7 +83,7 @@ Four versions move fastest. If Gradle can't resolve, bump in this order and re-r
 | `agp` | `gradle/libs.versions.toml` | Must be compatible with your Gradle version |
 | `kotlin` | same | Compose plugin tracks Kotlin version exactly |
 | `composeBom` | same | Controls all Compose artifact versions |
-| `roborazzi` | same | Screenshot library; plugin and library versions must match |
+| `roborazzi` | same | Plugin and library versions must match |
 
 Check the AGP ↔ Gradle compatibility table before bumping AGP. Android Studio's "AGP Upgrade
 Assistant" is the safest route.
@@ -110,34 +93,52 @@ this repo; a silent upgrade is exactly the change the guards exist to prevent.
 
 ---
 
-## 7. Known pitfalls
+## 6. Known pitfalls
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | Robolectric downloads `android-all` jars on first test run | Normal; it fetches an Android runtime jar | Allowed network on first run; cached afterwards |
 | `No such property: roborazzi` | Plugin not applied to the module running screenshots | Apply `alias(libs.plugins.roborazzi)` in `app/build.gradle.kts` |
-| Screenshots differ on CI but not locally | Font rendering / DPI / theme differences | Qualifiers are pinned in `@Config`; force `darkTheme = false` (already done) |
+| Screenshots differ on CI but not locally | Font rendering / DPI / theme differences | Qualifiers are pinned in `@Config`; `darkTheme = false` is forced |
 | `verifyRoborazziDebug` fails on a fresh clone | No goldens committed | Run record, review, commit |
 | Configuration cache warnings | Some plugins aren't fully compatible | `problems=warn` is set deliberately; fix warnings when convenient |
 | `kotlinOptions` deprecation warning | Kotlin 2.x prefers `compilerOptions` | Harmless; migrate when you bump Kotlin |
 
 ---
 
-## 8. Before you publish this repo
+## 7. Benchmark it yourself
 
-- [ ] `./gradlew verify` green, and again after a clean clone
-- [ ] Goldens committed and visually reviewed
-- [ ] `README.md` §Results filled with **your** measurements, machine noted
-- [ ] Repository renamed to something specific (`android-agent-harness` is fine; `my-android-app` is not)
-- [ ] Description + topics: `android`, `ai-agents`, `compose`, `roborazzi`, `developer-tools`, `ci`
-- [ ] CI badge added
+```bash
+RUNS=3 ./scripts/benchmark-verify.sh
+```
+
+Paste the means into `README.md` §Results, with the date and the machine. A number without a
+machine is not a measurement, and a before/after table with no methodology is a marketing claim.
+
+If the warm number is above ~60s, the loop is too slow for an agent. Fix in this order:
+
+1. Is the configuration cache actually being reused? (`./gradlew verify --configuration-cache`)
+2. Is the build cache local-only? Consider a remote cache.
+3. Are you running the full multi-module build while iterating? Use the module-scoped task.
+4. Is KSP/annotation processing the bottleneck? Check `--profile`.
+
+---
+
+## 8. Before you publish
+
+- [x] `./gradlew verify` green
+- [x] Goldens committed and visually reviewed
+- [x] `README.md` §Results filled with measured values, machine noted
+- [ ] Create the GitHub repository, push, add description + topics:
+      `android`, `ai-agents`, `compose`, `roborazzi`, `developer-tools`, `ci`
+- [ ] CI badge added to the README
 - [ ] `LICENSE` copyright line updated
 - [ ] No secrets, no employer code, no client names
-- [ ] Commit history is honest — no fake "initial commit" then backdated work
+- [ ] Commit history is honest — no backdated work
 
-**Do not publish numbers you have not measured.** The whole credibility of this repository is
-that it reports what actually happened, including what didn't work. One invented metric destroys
-that, and interviewers do ask how you measured.
+**Do not publish numbers you have not measured.** The whole credibility of this repository is that
+it reports what actually happened, including what didn't work. One invented metric destroys that,
+and interviewers do ask how you measured.
 
 ---
 

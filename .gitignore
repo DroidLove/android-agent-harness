@@ -19,3 +19,7 @@ keystore.properties
 # Test output, but NOT app/src/test/screenshots (goldens are committed on purpose)
 app/build/
 core/ui/build/
+**/build/
+
+# Kotlin incremental-compiler scratch dir (contains session .salive files)
+.kotlin/

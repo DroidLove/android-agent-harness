@@ -29,17 +29,36 @@ so the agent gets a spec rather than a wish.
 
 ## Results
 
-> Replace this table with your own measurements. Do not publish numbers you haven't measured —
-> see `docs/measurement.md`.
+Measured on **Apple M2 (8 cores), 16 GB, macOS 26.6.2, JDK 17 (Temurin), Gradle 8.11.1**,
+2026-10-20. Rerun with `RUNS=3 ./scripts/benchmark-verify.sh`.
 
-| Metric | Before | After | How measured |
-|---|---|---|---|
-| Warm `verify` duration | _e.g. 11m 40s_ | _e.g. 48s_ | `scripts/benchmark-verify.sh` |
-| Cold build | _e.g. 14m_ | _e.g. 6m 10s_ | clean clone + `./gradlew verify` |
-| UI change feedback | emulator, _e.g. 3–5 min_ | JVM screenshot, _e.g. <2s_ | `./gradlew :app:recordRoborazziDebug` |
-| Agent PRs needing a second review round | _e.g. 62%_ | _e.g. 18%_ | count review rounds per PR |
-| Revert rate (agent cohort vs human) | _e.g. 4.1%_ | _e.g. 4.3%_ | `git log --grep="Agent-PR"` |
-| Defect escapes per release | — | — | post-release hotfix count |
+| Measurement | Value | How |
+|---|---|---|
+| First run on a fresh machine (downloads + SDK components) | **8m 45s** | first `./gradlew verify`, ~1 GB fetched |
+| Clean tree, build cache disabled, cold daemon | **17.4s** | `./gradlew clean && ./gradlew verify --no-build-cache` |
+| Clean tree, warm build cache | **3.5s** | `./gradlew clean && ./gradlew verify` |
+| Warm `verify` (compile + tests + lint + screenshots) | **4s** | 3 runs: 4s / 4s / 4s |
+| Module-scoped unit tests while iterating | **3s** | 3 runs: 3s / 4s / 4s |
+| **UI edit → compile → render → pixel verdict** | **6.5s** | edit one word, `./gradlew :app:verifyRoborazziDebug`; 2 runs: 6.6s / 6.3s |
+| Screenshot render alone (no source change) | **0.6s** | `./gradlew :app:recordRoborazziDebug` |
+
+The number that matters is the second-to-last one. An agent that can see the rendered result of a
+UI change in 6.5 seconds can iterate; one waiting on an emulator cannot.
+
+What the gates caught, measured on this repo:
+
+| Scenario | Result |
+|---|---|
+| Changed one word on the error screen | failed `home_error` only — 1 of 7 tests — with `_actual`/`_compare` images |
+| Deleted one `@Test` | `agent-check.sh` failed: `@Test count: 7 -> 6` |
+| Edited `gradle/libs.versions.toml` | failed: dependency change requires human approval |
+| Pasted an API-key-shaped string | failed: possible credential in the diff |
+
+### What is not measured here
+
+Review-round counts, revert rates and defect escapes are in the previous version of this table as
+placeholders. They need a real team and months of history; this repo has neither, so it doesn't
+claim them. See `docs/measurement.md` for how to instrument them where the data exists.
 
 ---
 
@@ -48,22 +67,22 @@ so the agent gets a spec rather than a wish.
 Requires **JDK 17** and the **Android SDK (API 35)**.
 
 ```bash
-# 1. Generate the Gradle wrapper (not committed in this scaffold)
-gradle wrapper --gradle-version 8.11.1
-
-# 2. Verify everything — this is the only command an agent needs to know
+# The only command an agent needs to know
 ./gradlew verify
 
-# 3. Record golden screenshots (first time only), then commit them
-./gradlew :app:recordRoborazziDebug
-git add app/src/test/screenshots
-
-# 4. From then on, screenshot changes are a test failure, not a review argument
+# Screenshot changes are a test failure, not a review argument
 ./gradlew :app:verifyRoborazziDebug
+
+# Re-record goldens only when the visual change is intended
+./gradlew :app:recordRoborazziDebug
+
+# The same guards as CI, locally, before you push
+./scripts/agent-check.sh
 ```
 
-If dependency resolution fails on first run, see `docs/first-run.md` — four versions move often
-and may need bumping.
+The wrapper is committed. The first run downloads Gradle plus dependencies (~1 GB) into
+`~/.gradle`; after that the loop is seconds. If dependency resolution fails, see
+`docs/first-run.md` — four versions move often and may need bumping.
 
 ---
 
@@ -73,8 +92,8 @@ and may need bumping.
 AGENTS.md                  ← the contract with the agent. Read this first.
 CLAUDE.md                  ← Claude Code entry point (imports AGENTS.md)
 app/                       ← application module
-core/ui/                   ← theme + design system, no business logic
   src/test/screenshots/    ← golden images, committed
+core/ui/                   ← theme + design system, no business logic
 .github/workflows/
   verify.yml               ← build + unit + lint + screenshots
   guards.yml               ← test-integrity, dependency, secret, diff-size gates
